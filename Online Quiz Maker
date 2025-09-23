@@ -1,0 +1,399 @@
+/*
+Online Quiz Maker — Full web program (Frontend)
+
+This document contains a single-file React frontend (App.jsx) that is ready to connect to the Node/Express backend
+presented earlier in the canvas. It uses fetch, JWT auth (stored in localStorage), and implements:
+- Register / Login
+- Browse quizzes (GET /api/quizzes)
+- Create quiz (POST /api/quizzes) — protected
+- Take quiz (GET /api/quizzes/:id and POST /api/quizzes/:id/submit)
+- Show results
+
+Drop this file into a React project (Vite or CRA). Update BASE_URL if your backend runs on a different host.
+Requires: Tailwind (optional) or basic CSS
+*/
+
+import React, { useEffect, useState } from 'react';
+
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000';
+
+export default function App() {
+  const [route, setRoute] = useState('home');
+  const [token, setToken] = useState(localStorage.getItem('oqm_token') || null);
+  const [username, setUsername] = useState(localStorage.getItem('oqm_user') || null);
+  const [quizzes, setQuizzes] = useState([]);
+  const [selectedQuiz, setSelectedQuiz] = useState(null);
+
+  useEffect(() => { fetchQuizzes(); }, []);
+
+  function saveAuth(t, user) {
+    if (t) {
+      localStorage.setItem('oqm_token', t);
+      localStorage.setItem('oqm_user', user);
+      setToken(t);
+      setUsername(user);
+    } else {
+      localStorage.removeItem('oqm_token');
+      localStorage.removeItem('oqm_user');
+      setToken(null);
+      setUsername(null);
+    }
+  }
+
+  async function fetchQuizzes() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/quizzes`);
+      const json = await res.json();
+      setQuizzes(json);
+    } catch (e) {
+      console.error('Failed to fetch quizzes', e);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-4xl mx-auto">
+        <Header username={username} onSignOut={() => saveAuth(null, null)} go={(r) => setRoute(r)} />
+
+        {route === 'home' && (
+          <Home onCreate={() => setRoute('create')} onBrowse={() => setRoute('list')} quizzes={quizzes.slice(0,5)} />
+        )}
+
+        {route === 'auth' && (
+          <Auth onDone={(t, u) => { saveAuth(t, u); setRoute('home'); }} onBack={() => setRoute('home')} />
+        )}
+
+        {route === 'list' && (
+          <QuizList quizzes={quizzes} onRefresh={fetchQuizzes} onTake={(q) => { setSelectedQuiz(q); setRoute('take'); }} onCreate={() => setRoute('create')} />
+        )}
+
+        {route === 'create' && (
+          <CreateQuiz token={token} onSaved={() => { fetchQuizzes(); setRoute('list'); }} onCancel={() => setRoute('list')} username={username} />
+        )}
+
+        {route === 'take' && selectedQuiz && (
+          <TakeQuiz quizId={selectedQuiz._id || selectedQuiz.id} token={token} onFinish={(result) => { setSelectedQuiz({ ...selectedQuiz, _result: result }); setRoute('results'); }} onBack={() => setRoute('list')} />
+        )}
+
+        {route === 'results' && selectedQuiz && (
+          <Results quiz={selectedQuiz} onBack={() => setRoute('list')} />
+        )}
+
+        <footer className="mt-8 text-center text-sm text-gray-500">Online Quiz Maker — Full-stack demo</footer>
+      </div>
+    </div>
+  );
+}
+
+function Header({ username, onSignOut, go }) {
+  return (
+    <header className="flex items-center justify-between py-4">
+      <div>
+        <h1 className="text-2xl font-bold">📚 Online Quiz Maker</h1>
+        <p className="text-sm text-gray-600">Create, share and take quizzes — instant feedback.</p>
+      </div>
+      <nav className="flex items-center gap-3">
+        <button className="px-3 py-1 rounded-md hover:bg-gray-200" onClick={() => go('home')}>Home</button>
+        <button className="px-3 py-1 rounded-md hover:bg-gray-200" onClick={() => go('list')}>Browse</button>
+        {username ? (
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 rounded bg-indigo-50 text-indigo-700">{username}</span>
+            <button className="px-3 py-1 rounded-md border" onClick={() => { onSignOut(); go('home'); }}>Sign out</button>
+          </div>
+        ) : (
+          <button className="px-3 py-1 rounded-md border" onClick={() => go('auth')}>Sign in</button>
+        )}
+      </nav>
+    </header>
+  );
+}
+
+function Home({ onCreate, onBrowse, quizzes }) {
+  return (
+    <main className="mt-6">
+      <section className="bg-white p-6 rounded-lg shadow-sm">
+        <h2 className="text-xl font-semibold mb-2">Welcome!</h2>
+        <p className="text-gray-700 mb-4">Create quizzes, challenge friends or practice with community quizzes.</p>
+        <div className="flex gap-3 flex-wrap">
+          <button className="px-4 py-2 rounded bg-indigo-600 text-white" onClick={onCreate}>Create a Quiz</button>
+          <button className="px-4 py-2 rounded border" onClick={onBrowse}>Browse Quizzes</button>
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <h3 className="font-semibold mb-2">Featured quizzes</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {quizzes.length ? quizzes.map(q => (
+            <div key={q._id || q.id} className="p-4 bg-white rounded shadow-sm">
+              <h4 className="font-semibold">{q.title}</h4>
+              <p className="text-sm text-gray-500">{(q.questions && q.questions.length) || 0} questions • by {q.owner}</p>
+            </div>
+          )) : (
+            <div className="text-gray-500">No quizzes yet — be the first to create one!</div>
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function Auth({ onDone, onBack }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+      const res = await fetch(`${BASE_URL}${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Auth failed');
+      onDone(json.token, json.username || username);
+    } catch (err) {
+      alert(err.message);
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="mt-6 bg-white p-6 rounded shadow-sm max-w-md mx-auto">
+      <h3 className="text-lg font-semibold mb-3">{isLogin ? 'Sign in' : 'Create account'}</h3>
+      <form onSubmit={submit} className="space-y-3">
+        <input className="w-full p-2 border rounded" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input type="password" className="w-full p-2 border rounded" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <div className="flex gap-2">
+          <button className="px-4 py-2 rounded bg-indigo-600 text-white" type="submit" disabled={loading}>{isLogin ? 'Sign in' : 'Create'}</button>
+          <button type="button" className="px-4 py-2 rounded border" onClick={() => setIsLogin(s => !s)}>{isLogin ? 'Switch to create account' : 'Have an account? Sign in'}</button>
+          <button type="button" className="px-3 py-2" onClick={onBack}>Back</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function QuizList({ quizzes, onRefresh, onTake, onCreate }) {
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-semibold">Available quizzes</h3>
+        <div className="flex gap-2">
+          <button className="px-3 py-1 rounded bg-indigo-600 text-white" onClick={onCreate}>Create</button>
+          <button className="px-3 py-1 rounded border" onClick={onRefresh}>Refresh</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {quizzes.length ? quizzes.map(q => (
+          <div key={q._id || q.id} className="p-4 bg-white rounded shadow-sm">
+            <h4 className="font-semibold">{q.title}</h4>
+            <p className="text-sm text-gray-500">{(q.questions && q.questions.length) || 0} questions • by {q.owner}</p>
+            <p className="mt-2 text-sm">{q.description}</p>
+            <div className="mt-3 flex gap-2">
+              <button className="px-3 py-1 rounded bg-indigo-600 text-white" onClick={() => onTake(q)}>Take Quiz</button>
+            </div>
+          </div>
+        )) : (
+          <div className="text-gray-500">No quizzes posted yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CreateQuiz({ token, onSaved, onCancel, username }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  function addQuestion() { setQuestions(q => [...q, { id: Date.now() + Math.random(), text: '', options: ['', ''], correctIndex: 0 }]); }
+  function updateQuestion(id, patch) { setQuestions(q => q.map(x => x.id === id ? { ...x, ...patch } : x)); }
+  function removeQuestion(id) { setQuestions(q => q.filter(x => x.id !== id)); }
+  function addOption(qid) { setQuestions(q => q.map(x => x.id === qid ? { ...x, options: [...x.options, ''] } : x)); }
+  function updateOption(qid, idx, val) { setQuestions(q => q.map(x => x.id === qid ? { ...x, options: x.options.map((o,i) => i===idx?val:o) } : x)); }
+  function removeOption(qid, idx) { setQuestions(q => q.map(x => { if (x.id !== qid) return x; const newOpts = x.options.filter((_,i)=>i!==idx); const newCorrect = Math.max(0, Math.min(x.correctIndex, newOpts.length-1)); return { ...x, options: newOpts, correctIndex: newCorrect }; })); }
+
+  async function handleSave() {
+    if (!token) return alert('You must be signed in to create a quiz.');
+    if (!title.trim()) return alert('Please add a quiz title');
+    if (!questions.length) return alert('Add at least one question');
+    for (const q of questions) { if (!q.text.trim()) return alert('All questions need text'); if (q.options.length < 2) return alert('Each question needs at least 2 options'); if (q.options.some(o=>!o.trim())) return alert('All options must be filled'); }
+
+    setLoading(true);
+    try {
+      const body = { title: title.trim(), description: description.trim(), questions: questions.map(q => ({ text: q.text, options: q.options, correctIndex: q.correctIndex })) };
+      const res = await fetch(`${BASE_URL}/api/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to save');
+      alert('Quiz saved');
+      onSaved();
+    } catch (e) { alert(e.message); } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="mt-6 bg-white p-6 rounded shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">Create a new quiz</h3>
+        <div className="text-sm text-gray-500">Signed in as {username}</div>
+      </div>
+
+      <div className="space-y-3">
+        <input className="w-full p-2 border rounded" placeholder="Quiz title" value={title} onChange={e=>setTitle(e.target.value)} />
+        <textarea className="w-full p-2 border rounded" placeholder="Short description (optional)" value={description} onChange={e=>setDescription(e.target.value)} />
+
+        <div>
+          <h4 className="font-semibold mb-2">Questions</h4>
+          <div className="space-y-4">
+            {questions.map((q,qi)=> (
+              <div key={q.id} className="p-3 border rounded">
+                <div className="flex justify-between items-start">
+                  <strong>Q{qi+1}</strong>
+                  <div className="flex gap-2">
+                    <button className="px-2 py-1 text-sm rounded border" onClick={()=>removeQuestion(q.id)}>Remove</button>
+                  </div>
+                </div>
+                <input className="w-full p-2 border rounded mt-2" placeholder="Question text" value={q.text} onChange={e=>updateQuestion(q.id,{ text: e.target.value })} />
+
+                <div className="mt-2 space-y-2">
+                  {q.options.map((opt, oi) => (
+                    <div key={oi} className="flex gap-2 items-center">
+                      <input type="radio" name={String(q.id)} checked={q.correctIndex===oi} onChange={()=>updateQuestion(q.id,{ correctIndex: oi })} />
+                      <input className="flex-1 p-2 border rounded" value={opt} onChange={e=>updateOption(q.id, oi, e.target.value)} />
+                      {q.options.length > 2 && (<button className="px-2 py-1 rounded border text-sm" onClick={()=>removeOption(q.id, oi)}>x</button>)}
+                    </div>
+                  ))}
+
+                  <div className="flex gap-2 mt-2">
+                    <button className="px-3 py-1 rounded border" onClick={()=>addOption(q.id)}>Add option</button>
+                    <div className="text-sm text-gray-500 self-center">Select the radio as the correct answer.</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div><button className="px-4 py-2 rounded bg-green-600 text-white" onClick={addQuestion}>Add question</button></div>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button className="px-4 py-2 rounded bg-indigo-600 text-white" onClick={handleSave} disabled={loading}>{loading ? 'Saving...' : 'Save Quiz'}</button>
+          <button className="px-4 py-2 rounded border" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TakeQuiz({ quizId, token, onFinish, onBack }) {
+  const [quiz, setQuiz] = useState(null);
+  const [index, setIndex] = useState(0);
+  const [answers, setAnswers] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { load(); }, [quizId]);
+
+  async function load() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/quizzes/${quizId}`);
+      const json = await res.json();
+      setQuiz(json);
+      setAnswers(Array(json.questions.length).fill(null));
+    } catch (e) { console.error(e); }
+  }
+
+  function choose(i) { const copy = [...answers]; copy[index] = i; setAnswers(copy); }
+  function next() { if (index < quiz.questions.length -1) setIndex(i=>i+1); else submit(); }
+  function prev() { if (index>0) setIndex(i=>i-1); }
+
+  async function submit() {
+    if (!token) return alert('You must be signed in to submit answers.');
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/quizzes/${quizId}/submit`, { method: 'POST', headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ answers }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Submission failed');
+      onFinish(json);
+    } catch (e) { alert(e.message); } finally { setLoading(false); }
+  }
+
+  if (!quiz) return <div className="mt-6 p-4 bg-white rounded">Loading quiz…</div>;
+
+  const q = quiz.questions[index];
+
+  return (
+    <div className="mt-6 bg-white p-6 rounded shadow-sm">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-semibold">{quiz.title}</h3>
+        <div className="text-sm text-gray-500">Q {index+1} / {quiz.questions.length}</div>
+      </div>
+
+      <div>
+        <div className="mb-4"><div className="font-medium">{q.text}</div></div>
+        <div className="space-y-2">{q.options.map((opt, oi) => (
+          <label key={oi} className="flex items-center gap-3 p-2 border rounded">
+            <input type="radio" name={`q_${index}`} checked={answers[index]===oi} onChange={()=>choose(oi)} />
+            <span>{opt}</span>
+          </label>
+        ))}</div>
+
+        <div className="mt-4 flex gap-2">
+          <button className="px-3 py-1 rounded border" onClick={prev} disabled={index===0}>Previous</button>
+          <button className="px-3 py-1 rounded bg-indigo-600 text-white" onClick={next} disabled={loading}>{index===quiz.questions.length-1 ? (loading ? 'Submitting...' : 'Finish') : 'Next'}</button>
+          <button className="px-3 py-1 rounded border" onClick={onBack}>Abort</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Results({ quiz, onBack }) {
+  // quiz may include _result returned from submit
+  const result = quiz._result || { score: 0, total: (quiz.questions || []).length };
+
+  return (
+    <div className="mt-6 bg-white p-6 rounded shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">Results — {quiz.title}</h3>
+        <div className="text-sm text-gray-500">Score: {result.score} / {result.total}</div>
+      </div>
+
+      <div className="space-y-3">
+        {quiz.questions.map((q, i) => (
+          <div key={i} className="p-3 border rounded">
+            <div className="font-medium">Q{i+1}. {q.text}</div>
+            <div className="mt-2 space-y-1">
+              {q.options.map((opt, oi) => {
+                const isCorrect = typeof q.correctIndex !== 'undefined' && oi === q.correctIndex;
+                // We don't know what the user picked on the server response (server didn't echo answers by design);
+                // this UI highlights the correct answer. If you want the server to return detailed attempt info,
+                // update POST /quizzes/:id/submit to return per-question data.
+                const bg = isCorrect ? 'bg-green-50' : '';
+                return (
+                  <div key={oi} className={`p-2 rounded ${bg}`}>
+                    <div><span className="mr-2">{String.fromCharCode(65+oi)}.</span>{opt}</div>
+                    <div className="text-sm text-gray-600">{isCorrect ? 'Correct answer' : ''}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button className="px-3 py-1 rounded border" onClick={onBack}>Back to quizzes</button>
+      </div>
+    </div>
+  );
+}
+
+/*
+Notes & next steps:
+- The server currently does not return which answers the user picked; it only returns score. If you want per-question feedback showing the user's choices, update the server to store/return attempt details and adjust TakeQuiz/Results to display them.
+- Add form validation and UX polish for production.
+- Consider using axios + React Query for better data fetching in larger apps.
+- For production use HTTPS and secure storage of tokens (or use httpOnly cookies).
+*/
