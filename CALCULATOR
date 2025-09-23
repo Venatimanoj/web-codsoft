@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Single File Web Program</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      text-align: center;
+      padding: 50px;
+    }
+
+    h1 {
+      color: #333;
+    }
+
+    button {
+      padding: 15px 30px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      font-size: 18px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    #output {
+      margin-top: 30px;
+      font-size: 20px;
+      color: #444;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>👋 Welcome to My Web Page</h1>
+  <p>This is a simple single-file program using HTML, CSS, and JavaScript.</p>
+
+  <button onclick="sayHello()">Click Me</button>
+
+  <div id="output"></div>
+
+  <script>
+    function sayHello() {
+      document.getElementById("output").innerText = "🎉 Hello, World! You clicked the button.";
+    }
+  </script>
+
+</body>
+</html>
