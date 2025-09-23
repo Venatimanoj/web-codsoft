@@ -1,0 +1,395 @@
+// App.jsx
+import React, { useEffect, useState } from "react";
+
+/*
+Single-file e-commerce demo (localStorage-based)
+Paste into src/App.jsx of a Vite / CRA React app.
+Optional: replace styles or hook to a real backend later.
+*/
+
+const SAMPLE_PRODUCTS = [
+  { id: "p1", title: "Classic Backpack", price: 1999, category: "Bags", description: "Durable backpack with laptop sleeve.", inventory: 8 },
+  { id: "p2", title: "Wireless Headphones", price: 3499, category: "Electronics", description: "Noise-cancelling over-ear headphones.", inventory: 5 },
+  { id: "p3", title: "Running Shoes", price: 2999, category: "Footwear", description: "Lightweight running shoes for daily jogs.", inventory: 12 },
+  { id: "p4", title: "Coffee Mug", price: 399, category: "Home", description: "Ceramic mug, 350ml.", inventory: 30 },
+  { id: "p5", title: "Smart Watch", price: 6999, category: "Electronics", description: "Fitness watch with heart rate monitor.", inventory: 4 },
+];
+
+function useLocalStorageState(key, initial) {
+  const [s, setS] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(s)); } catch {}
+  }, [key, s]);
+  return [s, setS];
+}
+
+export default function App() {
+  const [route, setRoute] = useState("home"); // home, product, cart, checkout, orders, auth
+  const [products, setProducts] = useLocalStorageState("ecom_products", SAMPLE_PRODUCTS);
+  const [cart, setCart] = useLocalStorageState("ecom_cart", []);
+  const [user, setUser] = useLocalStorageState("ecom_user", null); // { username }
+  const [selected, setSelected] = useState(null);
+  const [orders, setOrders] = useLocalStorageState("ecom_orders", []);
+
+  // filters
+  const [q, setQ] = useState("");
+  const categories = ["All", ...Array.from(new Set(products.map((p) => p.category)))];
+  const [category, setCategory] = useState("All");
+
+  // product actions
+  function viewProduct(p) {
+    setSelected(p);
+    setRoute("product");
+  }
+
+  function addToCart(product, qty = 1) {
+    setCart((c) => {
+      const existing = c.find((it) => it.product.id === product.id);
+      if (existing) {
+        return c.map((it) => (it.product.id === product.id ? { ...it, qty: Math.min(it.qty + qty, product.inventory) } : it));
+      }
+      return [...c, { product, qty: Math.min(qty, product.inventory) }];
+    });
+    setRoute("cart");
+  }
+
+  function updateQty(index, qty) {
+    setCart((c) => c.map((it, i) => (i === index ? { ...it, qty: Math.max(1, Math.min(qty, it.product.inventory)) } : it)));
+  }
+
+  function removeFromCart(index) {
+    setCart((c) => c.filter((_, i) => i !== index));
+  }
+
+  function clearCart() {
+    setCart([]);
+  }
+
+  // auth (very simple demo)
+  function register(username, password) {
+    // store users in localStorage 'ecom_users' (insecure demo only)
+    const raw = localStorage.getItem("ecom_users");
+    const users = raw ? JSON.parse(raw) : [];
+    if (users.find((u) => u.username === username)) throw new Error("Username already exists");
+    users.push({ username, password });
+    localStorage.setItem("ecom_users", JSON.stringify(users));
+    setUser({ username });
+  }
+
+  function login(username, password) {
+    const raw = localStorage.getItem("ecom_users");
+    const users = raw ? JSON.parse(raw) : [];
+    const found = users.find((u) => u.username === username && u.password === password);
+    if (!found) throw new Error("Invalid credentials");
+    setUser({ username });
+  }
+
+  function signout() {
+    setUser(null);
+  }
+
+  // checkout (mock)
+  function placeOrder(shipping) {
+    if (!user) throw new Error("You must be logged in to place an order");
+    if (!cart.length) throw new Error("Cart is empty");
+    // snapshot items
+    const items = cart.map((it) => ({ productId: it.product.id, title: it.product.title, price: it.product.price, qty: it.qty }));
+    const total = items.reduce((s, it) => s + it.price * it.qty, 0);
+    const order = { id: "ord_" + Date.now(), user: user.username, name: shipping.name, address: shipping.address, items, total, createdAt: new Date().toISOString() };
+    setOrders((o) => [order, ...o]);
+    clearCart();
+    return order;
+  }
+
+  // product management: add sample product (dev helper)
+  function addSampleProduct() {
+    setProducts((p) => {
+      const id = "p" + (p.length + 1) + "_" + Math.floor(Math.random() * 999);
+      return [...p, { id, title: "New Product " + id, price: 999, category: "Misc", description: "Newly added.", inventory: 10 }];
+    });
+  }
+
+  // filtered list
+  const filtered = products.filter((p) => {
+    if (category !== "All" && p.category !== category) return false;
+    if (!q) return true;
+    return p.title.toLowerCase().includes(q.toLowerCase()) || (p.description || "").toLowerCase().includes(q.toLowerCase());
+  });
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.container}>
+        <Header
+          user={user}
+          cartCount={cart.reduce((a, b) => a + b.qty, 0)}
+          onSignIn={() => setRoute("auth")}
+          onSignOut={signout}
+          onViewCart={() => setRoute("cart")}
+          onHome={() => setRoute("home")}
+        />
+
+        {route === "home" && (
+          <>
+            <div style={styles.hero}>
+              <div>
+                <h2 style={{ margin: 0 }}>Welcome to ShopDemo</h2>
+                <p style={{ margin: "6px 0 0 0", color: "#444" }}>Browse products, add to cart, and checkout — demo only.</p>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={styles.button} onClick={() => setRoute("cart")}>View Cart</button>
+                <button style={styles.ghost} onClick={addSampleProduct}>Add Sample Product</button>
+              </div>
+            </div>
+
+            <div style={styles.filterRow}>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products..." style={styles.input} />
+              <select value={category} onChange={(e) => setCategory(e.target.value)} style={styles.select}>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div style={styles.grid}>
+              {filtered.map((p) => (
+                <div key={p.id} style={styles.card}>
+                  <div style={styles.imageBox}>{p.image ? <img src={p.image} alt={p.title} style={{ maxWidth: "100%", maxHeight: "100%" }} /> : <span style={{ color: "#999" }}>No image</span>}</div>
+                  <h3 style={{ margin: "8px 0 4px 0" }}>{p.title}</h3>
+                  <div style={{ color: "#666", fontSize: 13 }}>{p.category}</div>
+                  <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontWeight: "bold" }}>₹{p.price}</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={styles.small} onClick={() => viewProduct(p)}>View</button>
+                      <button style={styles.primarySmall} onClick={() => addToCart(p)}>Add</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filtered.length === 0 && <div style={{ color: "#666", padding: 16 }}>No products found.</div>}
+            </div>
+          </>
+        )}
+
+        {route === "product" && selected && (
+          <ProductDetail product={selected} onBack={() => setRoute("home")} onAdd={addToCart} />
+        )}
+
+        {route === "cart" && (
+          <Cart
+            cart={cart}
+            updateQty={updateQty}
+            remove={removeFromCart}
+            onCheckout={() => setRoute("checkout")}
+            onContinue={() => setRoute("home")}
+          />
+        )}
+
+        {route === "checkout" && (
+          <Checkout
+            cart={cart}
+            onBack={() => setRoute("cart")}
+            onPlace={(shipping) => {
+              try {
+                const ord = placeOrder(shipping);
+                alert("Order placed: " + ord.id);
+                setRoute("orders");
+              } catch (e) {
+                alert(e.message);
+              }
+            }}
+            user={user}
+          />
+        )}
+
+        {route === "orders" && (
+          <Orders orders={orders} onBack={() => setRoute("home")} user={user} />
+        )}
+
+        {route === "auth" && (
+          <Auth onDone={() => setRoute("home")} onBack={() => setRoute("home")} login={login} register={register} setUser={setUser} />
+        )}
+
+        <footer style={styles.footer}>Demo e-commerce • Local only • Not for production</footer>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- components ---------- */
+
+function Header({ user, cartCount, onSignIn, onSignOut, onViewCart, onHome }) {
+  return (
+    <header style={styles.header}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <button onClick={onHome} style={{ background: "none", border: "none", fontSize: 18, fontWeight: "bold", cursor: "pointer" }}>ShopDemo</button>
+        <div style={{ color: "#666", fontSize: 13 }}>Simple demo store</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button onClick={onViewCart} style={styles.iconBtn}>Cart ({cartCount})</button>
+        {user ? (
+          <>
+            <div style={{ padding: "6px 10px", background: "#eef2ff", color: "#3730a3", borderRadius: 6 }}>{user.username}</div>
+            <button onClick={onSignOut} style={styles.ghost}>Sign out</button>
+          </>
+        ) : (
+          <button onClick={onSignIn} style={styles.primarySmall}>Sign in</button>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function ProductDetail({ product, onAdd, onBack }) {
+  const [qty, setQty] = useState(1);
+  return (
+    <div style={styles.cardLarge}>
+      <button onClick={onBack} style={styles.ghost}>← Back</button>
+      <div style={{ display: "flex", gap: 16, flexDirection: window.innerWidth < 700 ? "column" : "row" }}>
+        <div style={{ flex: 1, background: "#fafafa", borderRadius: 8, padding: 16, minHeight: 200 }}>
+          {product.image ? <img src={product.image} alt={product.title} style={{ maxWidth: "100%" }} /> : <div style={{ color: "#999" }}>No image</div>}
+        </div>
+        <div style={{ flex: 2 }}>
+          <h2 style={{ marginTop: 0 }}>{product.title}</h2>
+          <div style={{ color: "#666", marginBottom: 12 }}>{product.category}</div>
+          <div style={{ fontSize: 22, fontWeight: "bold" }}>₹{product.price}</div>
+          <p style={{ color: "#444" }}>{product.description}</p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
+            <input type="number" value={qty} min={1} max={product.inventory} onChange={(e) => setQty(Math.max(1, Number(e.target.value || 1)))} style={{ width: 80, padding: 8 }} />
+            <button style={styles.primary} onClick={() => onAdd(product, qty)}>Add to cart</button>
+          </div>
+          <div style={{ marginTop: 8, color: "#666", fontSize: 13 }}>In stock: {product.inventory}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Cart({ cart, updateQty, remove, onCheckout, onContinue }) {
+  const total = cart.reduce((s, it) => s + it.product.price * it.qty, 0);
+  return (
+    <div style={styles.cardLarge}>
+      <h2>Shopping Cart</h2>
+      {cart.length === 0 ? (
+        <div>Your cart is empty. <button onClick={onContinue} style={styles.link}>Continue shopping</button></div>
+      ) : (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {cart.map((it, i) => (
+              <div key={it.product.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
+                <div>
+                  <div style={{ fontWeight: "bold" }}>{it.product.title}</div>
+                  <div style={{ color: "#666", fontSize: 13 }}>₹{it.product.price} • {it.product.category}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input type="number" value={it.qty} min={1} max={it.product.inventory} onChange={(e) => updateQty(i, Number(e.target.value || 1))} style={{ width: 80, padding: 6 }} />
+                  <div style={{ fontWeight: "bold" }}>₹{it.product.price * it.qty}</div>
+                  <button onClick={() => remove(i)} style={styles.ghost}>Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: "bold" }}>Total: ₹{total}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onContinue} style={styles.ghost}>Continue shopping</button>
+              <button onClick={onCheckout} style={styles.primary}>Checkout</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Checkout({ cart, onBack, onPlace, user }) {
+  const [name, setName] = useState(user ? user.username : "");
+  const [address, setAddress] = useState("");
+  const total = cart.reduce((s, it) => s + it.product.price * it.qty, 0);
+
+  return (
+    <div style={styles.cardLarge}>
+      <h2>Checkout</h2>
+      <div style={{ marginBottom: 12 }}>Total: <strong>₹{total}</strong></div>
+      <input placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} style={styles.input} />
+      <textarea placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ ...styles.input, height: 100 }} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onBack} style={styles.ghost}>Back to cart</button>
+        <button onClick={() => onPlace({ name, address })} style={styles.primary}>Place order (demo)</button>
+      </div>
+      <div style={{ marginTop: 10, color: "#666", fontSize: 13 }}>This is a demo checkout. Integrate a payment gateway (Stripe/PayPal) before processing real payments.</div>
+    </div>
+  );
+}
+
+function Orders({ orders, onBack, user }) {
+  if (!user) return <div style={styles.cardLarge}>Sign in to view your orders.</div>;
+  const mine = orders.filter((o) => o.user === user.username);
+  return (
+    <div style={styles.cardLarge}>
+      <h2>Your Orders</h2>
+      {mine.length === 0 ? <div>No orders yet.</div> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {mine.map((o) => (
+            <div key={o.id} style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div><strong>{o.id}</strong></div>
+                <div style={{ color: "#666", fontSize: 13 }}>{new Date(o.createdAt).toLocaleString()}</div>
+              </div>
+              <div style={{ marginTop: 8 }}>Ship to: {o.name}</div>
+              <div style={{ marginTop: 8 }}>
+                {o.items.map((it) => <div key={it.productId} style={{ fontSize: 14 }}>{it.title} × {it.qty} — ₹{it.price * it.qty}</div>)}
+              </div>
+              <div style={{ marginTop: 8, fontWeight: "bold" }}>Total: ₹{o.total}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 12 }}><button onClick={onBack} style={styles.ghost}>Back</button></div>
+    </div>
+  );
+}
+
+function Auth({ onDone, onBack, login, register, setUser }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      if (isLogin) {
+        login(username, password);
+        onDone();
+      } else {
+        register(username, password);
+        onDone();
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  return (
+    <div style={styles.cardLarge}>
+      <h2>{isLogin ? "Sign in" : "Create account"}</h2>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} style={styles.input} />
+        <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={styles.input} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="submit" style={styles.primary}>{isLogin ? "Sign in" : "Create account"}</button>
+          <button type="button" onClick={() => setIsLogin((s) => !s)} style={styles.ghost}>{isLogin ? "Switch to create" : "Have an account? Sign in"}</button>
+          <button type="button" onClick={onBack} style={styles.ghost}>Back</button>
+        </div>
+      </form>
+      <p style={{ color: "#666", marginTop: 8 }}>Demo stores credentials locally (insecure). For real apps, use a backend and hashed passwords.</p>
+    </div>
+  );
+}
+
+};
